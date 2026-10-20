@@ -1,0 +1,120 @@
+// =====================================================================
+// Mesures DAX - Tableau de bord KPI bagages
+// À créer dans une table de mesures dédiée "_Mesures" (Saisir des données > table vide).
+// Modèle : fact_baggage -> dim_date / dim_conveyor / dim_flight ; fact_incident -> dim_conveyor / dim_date
+// =====================================================================
+
+// ---------- 1. Volumes ----------
+Bags = COUNTROWS ( fact_baggage )
+
+Bags On Time   = CALCULATE ( [Bags], fact_baggage[status] = "on_time" )
+Bags Late      = CALCULATE ( [Bags], fact_baggage[status] = "late" )
+Bags Mishandled = CALCULATE ( [Bags], fact_baggage[status] = "mishandled" )
+Bags In Issue  = [Bags Late] + [Bags Mishandled]
+
+Peak Hour Bags =
+MAXX ( VALUES ( fact_baggage[checkin_hour_ts] ), [Bags] )
+
+Bags per Conveyor km =
+DIVIDE ( [Bags], SUM ( dim_conveyor[length_m] ) / 1000 )
+
+// ---------- 2. Qualité de service ----------
+On-Time Rate = DIVIDE ( [Bags On Time], [Bags] )
+
+Late Rate = DIVIDE ( [Bags Late], [Bags] )
+
+Mishandled per 1000 = DIVIDE ( [Bags Mishandled], [Bags] ) * 1000
+
+// ---------- 3. Temps de traitement ----------
+Avg Processing Min    = AVERAGE ( fact_baggage[processing_min] )
+Median Processing Min = MEDIAN ( fact_baggage[processing_min] )
+P95 Processing Min    = PERCENTILE.INC ( fact_baggage[processing_min], 0.95 )
+
+// ---------- 4. Comparaisons temporelles ----------
+// Fenêtre glissante 7 jours (se termine à la dernière date visible)
+Bags Rolling 7d =
+CALCULATE (
+    [Bags],
+    DATESINPERIOD ( dim_date[full_date], MAX ( dim_date[full_date] ), -7, DAY )
+)
+
+On-Time Rate Rolling 7d =
+CALCULATE (
+    [On-Time Rate],
+    DATESINPERIOD ( dim_date[full_date], MAX ( dim_date[full_date] ), -7, DAY )
+)
+
+// Semaine précédente (même jour, S-1) : fonctionne dès 8 jours de données
+Bags LW = CALCULATE ( [Bags], DATEADD ( dim_date[full_date], -7, DAY ) )
+Bags vs LW % = DIVIDE ( [Bags] - [Bags LW], [Bags LW] )
+
+On-Time Rate LW = CALCULATE ( [On-Time Rate], DATEADD ( dim_date[full_date], -7, DAY ) )
+On-Time vs LW (pts) = ( [On-Time Rate] - [On-Time Rate LW] ) * 100
+
+// N-1 : ne renvoie une valeur qu'avec >= 2 ans de données (voir README)
+Bags PY = CALCULATE ( [Bags], SAMEPERIODLASTYEAR ( dim_date[full_date] ) )
+Bags vs PY % = DIVIDE ( [Bags] - [Bags PY], [Bags PY] )
+
+// ---------- 5. Vue « temps réel » (simulée) ----------
+// Heure de référence = dernier dépôt du contexte courant (ex. jour choisi dans le slicer).
+Reference Time = MAX ( fact_baggage[checkin_ts] )
+
+Bags Last 3h =
+VAR ref = [Reference Time]
+RETURN
+    CALCULATE (
+        [Bags],
+        FILTER (
+            ALL ( fact_baggage[checkin_ts] ),
+            fact_baggage[checkin_ts] > ref - 3 / 24
+                && fact_baggage[checkin_ts] <= ref
+        )
+    )
+
+On-Time Rate Last 3h =
+VAR ref = [Reference Time]
+RETURN
+    CALCULATE (
+        [On-Time Rate],
+        FILTER (
+            ALL ( fact_baggage[checkin_ts] ),
+            fact_baggage[checkin_ts] > ref - 3 / 24
+                && fact_baggage[checkin_ts] <= ref
+        )
+    )
+
+// ---------- 6. Goulots ----------
+// Part des bagages en anomalie portée par le convoyeur (diagramme de Pareto)
+Issue Share of Total =
+DIVIDE ( [Bags In Issue], CALCULATE ( [Bags In Issue], ALL ( dim_conveyor ) ) )
+
+Issue Rate = DIVIDE ( [Bags In Issue], [Bags] )
+
+// ---------- 7. Incidents ----------
+Incidents = COUNTROWS ( fact_incident )
+Downtime Min = SUM ( fact_incident[duration_min] )
+Avg Incident Duration = DIVIDE ( [Downtime Min], [Incidents] )
+
+// ---------- 8. Alertes (seuils : voir docs/KPI_dictionary.md) ----------
+On-Time Status =
+SWITCH (
+    TRUE (),
+    [On-Time Rate] >= 0.97, "OK",
+    [On-Time Rate] >= 0.95, "Alerte",
+    "Critique"
+)
+
+Mishandling Status =
+SWITCH (
+    TRUE (),
+    [Mishandled per 1000] <= 6, "OK",
+    [Mishandled per 1000] <= 8, "Alerte",
+    "Critique"
+)
+
+// Code couleur pour la mise en forme conditionnelle (Format > Couleur > Valeur du champ)
+On-Time Color =
+SWITCH ( [On-Time Status], "OK", "#2E8B57", "Alerte", "#F2A900", "#C0392B" )
+
+Mishandling Color =
+SWITCH ( [Mishandling Status], "OK", "#2E8B57", "Alerte", "#F2A900", "#C0392B" )

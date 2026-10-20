@@ -1,0 +1,13 @@
+{
+  "name": "ADP Bagages - sobre",
+  "dataColors": ["#1F4E79", "#2E8B57", "#F2A900", "#C0392B", "#5B8DB8", "#7F8C8D", "#8E44AD", "#16A085"],
+  "background": "#FFFFFF",
+  "foreground": "#1B2A38",
+  "tableAccent": "#1F4E79",
+  "good": "#2E8B57",
+  "neutral": "#F2A900",
+  "bad": "#C0392B",
+  "maximum": "#1F4E79",
+  "center": "#F2A900",
+  "minimum": "#C0392B"
+}
